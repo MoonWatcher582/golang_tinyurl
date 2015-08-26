@@ -17,20 +17,19 @@ func saveUrlHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func mainHandler(w http.ResponseWriter, r *http.Request) {
-	var url string;
 	link, err := getLink(w, r)
 	if err != nil {
 		return
 	}
 	if len(link) == 0 {
-		tmpl, err := template.ParseFiles("home.html")
+		tmpl, err := template.ParseFiles("src/tinyurl/home.html")
 		if err != nil {
 			http.NotFound(w, r)
 		}
 		tmpl.Execute(w, nil)
 		return
 	}
-	connection, err := sqlite3.Open("url.db")
+	connection, err := sqlite3.Open("src/tinyurl/url.db")
 	defer connection.Close()
 	if err != nil {
 		fmt.Fprintf(w, "DB Error")
@@ -39,12 +38,12 @@ func mainHandler(w http.ResponseWriter, r *http.Request) {
 	sql := fmt.Sprintf("SELECT url FROM url_mapping WHERE hash = \"%s\"", link)
 	url_query, err := connection.Query(sql)
 	if err != nil {
-		fmt.Printf("Could not find this hash")
-		http.Redirect(w, r, "/", http.StatusOK)
+		http.Redirect(w, r, "/", http.StatusMovedPermanently)
+		return
 	}
-	url_query.Scan(url)
-	fmt.Printf("URL: %s", url)
-	http.Redirect(w, r, url, http.StatusOK)
+	var url string
+	url_query.Scan(&url)
+	http.Redirect(w, r, url, http.StatusMovedPermanently)
 }
 
 func getLink(w http.ResponseWriter, r *http.Request) (string, error) {
