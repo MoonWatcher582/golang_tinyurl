@@ -1,14 +1,15 @@
 package main
 
 import (
+	"code.google.com/p/go-sqlite/go1/sqlite3"
 	"fmt"
+	"hash/fnv"
 	"html/template"
+	"io"
 	"net/http"
 	"net/url"
 	"regexp"
-	"hash/fnv"
 	"strconv"
-	"code.google.com/p/go-sqlite/go1/sqlite3"
 )
 
 type Message struct {
@@ -23,69 +24,83 @@ func saveUrlHandler(w http.ResponseWriter, r *http.Request) {
 	link := r.Form.Get("url-input")
 
 	connection, err := sqlite3.Open("src/tinyurl/url.db")
-	defer connection.Close()
 	if err != nil {
-		msg := &Message{Text: "Database error!", Type: "error"}
-		renderTemplate(w, r, msg)
+		renderError(w, r, "Database error!", err)
 		return
 	}
+	defer connection.Close()
 
+	//check if this link is already in the database
 	sql := fmt.Sprintf("SELECT url FROM url_mapping WHERE url = \"%s\"", link)
 	_, err = connection.Query(sql)
-	if err != nil {
+
+	//if not found...
+	if err == io.EOF {
 		url, err := url.Parse(link)
 		if err != nil {
-			msg := &Message{Text: "Invalid URL", Type: "Error"}
-			renderTemplate(w, r, msg)
+			renderError(w, r, "Invalid URL", err)
+			return
 		}
+
+		//if the website uses http(s), append http
 		if len(url.Scheme) == 0 {
 			link = "http://" + link
 		}
+
 		h := hash(link)
-		sql := fmt.Sprintf("INSERT INTO url_mapping VALUES(%s, %s);", h, link)
-		_, err = connection.Query(sql)
+		sql := fmt.Sprintf("INSERT INTO url_mapping VALUES(NULL, \"%s\", \"%s\");", h, link)
+		err = connection.Exec(sql)
 		if err != nil {
-			msg := &Message{Text: "Failed to update database!", Type: "error"}
-			renderTemplate(w, r, msg)
+			renderError(w, r, "Failed to update database!", err)
 			return
 		}
-		txt := fmt.Sprintf("%s mapped to %s!", link, h)
+		txt := fmt.Sprintf("%s mapped to %s", link, h)
 		msg := &Message{Text: txt, Type: "success"}
 		renderTemplate(w, r, msg)
 		return
 	}
+
+	fmt.Printf("Already in DB")
 	// already in DB, return hash that exists
 }
 
 func mainHandler(w http.ResponseWriter, r *http.Request) {
 	link, err := getLink(w, r)
 	if err != nil {
+		renderError(w, r, "URL parse error!", err)
 		return
 	}
+
 	if len(link) == 0 {
 		renderTemplate(w, r, nil)
 		return
 	}
 
 	connection, err := sqlite3.Open("src/tinyurl/url.db")
-	defer connection.Close()
 	if err != nil {
-		msg := &Message{Text: "Database error!", Type: "error"}
-		renderTemplate(w, r, msg)
+		renderError(w, r, "Database error!", err)
 		return
 	}
+	defer connection.Close()
 
 	sql := fmt.Sprintf("SELECT url FROM url_mapping WHERE hash = \"%s\"", link)
 	url_query, err := connection.Query(sql)
 	if err != nil {
-		msg := &Message{Text: "That tinyurl link does not exist!", Type: "error"}
-		renderTemplate(w, r, msg)
+		renderError(w, r, "That tinyurl link does not exist!", err)
 		return
 	}
+	defer url_query.Close()
 
 	var url string
 	url_query.Scan(&url)
 	http.Redirect(w, r, url, http.StatusMovedPermanently)
+}
+
+func renderError(w http.ResponseWriter, r *http.Request, text string, err error) {
+	fmt.Printf(err.Error())
+	msg := &Message{Text: text, Type: "error"}
+	renderTemplate(w, r, msg)
+	return
 }
 
 func renderTemplate(w http.ResponseWriter, r *http.Request, msg *Message) {
