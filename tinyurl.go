@@ -30,23 +30,23 @@ func saveUrlHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	defer connection.Close()
 
+	url, err := url.Parse(link)
+	if err != nil {
+		renderError(w, r, "Invalid URL", err)
+		return
+	}
+
+	//if the website uses http(s), append http
+	if len(url.Scheme) == 0 {
+		link = "http://" + link
+	}
+
 	//check if this link is already in the database
-	sql := fmt.Sprintf("SELECT url FROM url_mapping WHERE url = \"%s\"", link)
-	_, err = connection.Query(sql)
+	sql := fmt.Sprintf("SELECT hash FROM url_mapping WHERE url = \"%s\"", link)
+	hash_query, err := connection.Query(sql)
 
 	//if not found...
-	if err == io.EOF {
-		url, err := url.Parse(link)
-		if err != nil {
-			renderError(w, r, "Invalid URL", err)
-			return
-		}
-
-		//if the website uses http(s), append http
-		if len(url.Scheme) == 0 {
-			link = "http://" + link
-		}
-
+	if err == io.EOF && hash_query == nil {
 		h := hash(link)
 		sql := fmt.Sprintf("INSERT INTO url_mapping VALUES(NULL, \"%s\", \"%s\");", h, link)
 		err = connection.Exec(sql)
@@ -59,9 +59,15 @@ func saveUrlHandler(w http.ResponseWriter, r *http.Request) {
 		renderTemplate(w, r, msg)
 		return
 	}
+	defer hash_query.Close()
 
-	fmt.Printf("Already in DB")
 	// already in DB, return hash that exists
+	var return_hash string
+	//wtf???
+	hash_query.Scan(&return_hash)
+	txt := fmt.Sprintf("%s mapped to %s", link, return_hash)
+	msg := &Message{Text: txt, Type: "success"}
+	renderTemplate(w, r, msg)
 }
 
 func mainHandler(w http.ResponseWriter, r *http.Request) {
